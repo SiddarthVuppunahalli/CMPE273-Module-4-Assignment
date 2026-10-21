@@ -58,10 +58,10 @@ The project uses only Go's standard library. No external packages, database, or 
 
 1. **Project setup and architecture (complete):** establish the Go module, ignore generated files, document service boundaries and interaction types.
 2. **Inventory (complete):** implement the independent availability service with sample stock, add tests, and document how to run and query it.
-3. **Order (current step):** implement order creation and tracking, query Inventory over HTTP with a timeout, handle failures, and add tests and request examples.
-4. **Verification and submission documentation:** run both processes, stop and restart Inventory, capture actual output, and complete the README with evidence and a 3-5 sentence reflection.
+3. **Order (complete):** implement order creation and tracking, query Inventory over HTTP with a timeout, handle failures, and add tests and request examples.
+4. **Verification and submission documentation (complete):** run both processes, stop and restart Inventory, capture actual output, and complete the README with evidence and a 3-5 sentence reflection.
 
-Each step will be reviewed and committed before proceeding to the next. Service run commands and observed results will be added as those steps are completed.
+The project was implemented in these stages so each change could be reviewed and committed separately. Service run commands and observed results are included below.
 
 ## Run Inventory
 
@@ -233,4 +233,121 @@ Orders and IDs reset when Order restarts. Checking stock does not reserve or ded
 - `internal/order/order.go` validates commands, queries Inventory through HTTP, stores accepted orders, and supports order lookup.
 - `internal/order/order_test.go` checks creation, lookup, input validation, stock rejection, dependency errors, timeouts, and continued access to stored orders after Inventory stops.
 
-Run `go test ./...` and `go vet ./...` from the repository root. Order tests start temporary local HTTP servers automatically; they do not require manually started services. The final step will add the separate-process failure test and its captured output to this README.
+Run `go test ./...` and `go vet ./...` from the repository root. Order tests start temporary local HTTP servers automatically; they do not require manually started services. Both commands passed during implementation. The separate-process verification below additionally tests the compiled services communicating over HTTP.
+
+## Inventory failure test
+
+To reproduce the required failure test manually:
+
+1. Start Inventory and Order in separate terminals using the commands above.
+2. Submit the successful `item-1`, quantity `2` order and note the returned order ID.
+3. Stop Inventory with **Ctrl+C in terminal 1**. Leave Order running in terminal 2.
+4. Submit the same order request again. It returns `503 Service Unavailable` with the error `inventory service unavailable; please try again later`.
+5. Submit it once more and look up the previously created order. New orders still receive `503`, while the stored-order lookup returns `200`. Order continues running throughout the outage.
+6. Restart Inventory with `go run ./cmd/inventory`, then submit another order. It returns `201 Created` without restarting Order.
+
+This demonstrates that a failed dependency prevents new orders from being accepted, but does not crash the Order Service or prevent it from answering queries about its own data.
+
+### Automated reproduction
+
+From the repository root in PowerShell:
+
+```powershell
+.\scripts\verify.ps1
+```
+
+The script requires Go and `curl.exe`. It builds and starts two independent executables, verifies successful and rejected requests, stops Inventory, checks repeated failures and stored-order access, restarts Inventory, and checks recovery. It uses ports **18080 and 18081** so the manual services can remain on 8080 and 8081. It checks expected HTTP statuses and throws an error if a check fails.
+
+The script stops its own processes when it finishes and restores any environment variables it temporarily changed. Build outputs and service logs are in the ignored `bin/` directory. Its Go build and module caches are in the ignored `.cache/` directory.
+
+To choose different free ports or a custom Go installation:
+
+```powershell
+.\scripts\verify.ps1 -OrderPort 19080 -InventoryPort 19081 -GoExe 'C:\Program Files\Go\bin\go.exe'
+```
+
+To capture another run, use:
+
+```powershell
+.\scripts\verify.ps1 | Tee-Object -FilePath docs\verification.txt
+```
+
+### Captured result
+
+The full, actual request/response output is saved in [docs/verification.txt](docs/verification.txt). The following excerpt shows the successful order, dependency failure, continued operation, and recovery from that run. Blank lines between responses and status codes have been omitted for readability. Process IDs will differ on another run.
+
+```text
+Independent processes: Order PID=23124, Inventory PID=33860
+
+Successful order
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":2}
+{"id":"order-1","item_id":"item-1","quantity":2,"status":"created"}
+HTTP 201
+
+Stopped Inventory PID=33860
+
+Dependency failure
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":2}
+{"error":"inventory service unavailable; please try again later"}
+HTTP 503
+
+Repeated dependency failure
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":2}
+{"error":"inventory service unavailable; please try again later"}
+HTTP 503
+
+Stored order still accessible during outage
+GET http://127.0.0.1:18080/orders/order-1
+{"id":"order-1","item_id":"item-1","quantity":2,"status":"created"}
+HTTP 200
+Order PID=23124 remains running.
+
+Restarted Inventory PID=22404
+
+Recovery with the same Order process
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":2}
+{"id":"order-2","item_id":"item-1","quantity":2,"status":"created"}
+HTTP 201
+
+PASS: success, rejection, dependency failure, continued operation, and recovery verified.
+```
+
+## Screenshots
+
+Save the four screenshots below in `docs/screenshots/` using the exact filenames shown. These image slots will display the screenshots once the PNG files are added. See the [screenshot capture guide](docs/screenshots/README.md) for the commands and capture sequence.
+
+### 1. Successful order with both services running
+
+Show Inventory and Order running in separate terminals, along with a request that returns `201 Created` and the new order's JSON.
+
+![Both services running and an order successfully created](docs/screenshots/01-success.png)
+
+### 2. Unavailable item
+
+Show the request for `item-2` and its `409 Conflict` response.
+
+![An unavailable item produces HTTP 409](docs/screenshots/02-unavailable.png)
+
+### 3. Inventory failure with Order still running
+
+Show Inventory's terminal after Ctrl+C, a new order returning `503 Service Unavailable`, and an existing order lookup returning `200 OK`. Keep Order's running terminal visible.
+
+![Inventory stopped while Order handles dependency failures and serves an existing order](docs/screenshots/03-inventory-failure.png)
+
+### 4. Recovery after restarting Inventory
+
+Show Inventory restarted and a new order returning `201 Created`, with the original Order process still running.
+
+![Inventory restarted and the same Order process creates another order](docs/screenshots/04-recovery.png)
+
+## Reflection
+
+Clear service boundaries give each component a focused responsibility, making it easier to understand, test, and change independently. Explicit data ownership establishes which service is authoritative and prevents other services from changing its state behind its API. Communication through defined interfaces also makes dependencies and their failure modes visible, as shown when Order returns a controlled error during an Inventory outage. These boundaries support independent deployment and growth, while requiring careful decisions about consistency and coordination when a business operation spans multiple services.
+
+## Submission
+
+GitHub repository: [SiddarthVuppunahalli/CMPE273-Module-4-Assignment](https://github.com/SiddarthVuppunahalli/CMPE273-Module-4-Assignment)

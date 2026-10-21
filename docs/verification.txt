@@ -1,0 +1,62 @@
+Independent processes: Order PID=23124, Inventory PID=33860
+
+Inventory query
+GET http://127.0.0.1:18081/inventory/availability?item_id=item-1&quantity=2
+{"item_id":"item-1","quantity":2,"available":true}
+
+HTTP 200
+
+Successful order
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":2}
+{"id":"order-1","item_id":"item-1","quantity":2,"status":"created"}
+
+HTTP 201
+
+Unavailable item
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-2","quantity":1}
+{"error":"requested item or quantity is unavailable"}
+
+HTTP 409
+
+Invalid quantity
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":0}
+{"error":"provide one JSON object with a nonempty item_id and positive integer quantity"}
+
+HTTP 400
+
+Stopped Inventory PID=33860
+
+Dependency failure
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":2}
+{"error":"inventory service unavailable; please try again later"}
+
+HTTP 503
+
+Repeated dependency failure
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":2}
+{"error":"inventory service unavailable; please try again later"}
+
+HTTP 503
+
+Stored order still accessible during outage
+GET http://127.0.0.1:18080/orders/order-1
+{"id":"order-1","item_id":"item-1","quantity":2,"status":"created"}
+
+HTTP 200
+Order PID=23124 remains running.
+
+Restarted Inventory PID=22404
+
+Recovery with the same Order process
+POST http://127.0.0.1:18080/orders
+{"item_id":"item-1","quantity":2}
+{"id":"order-2","item_id":"item-1","quantity":2,"status":"created"}
+
+HTTP 201
+
+PASS: success, rejection, dependency failure, continued operation, and recovery verified.
