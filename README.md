@@ -54,15 +54,6 @@ If Go is installed but missing from PATH, use:
 
 The project uses only Go's standard library. No external packages, database, or message broker are required.
 
-## Implementation steps
-
-1. **Project setup and architecture (complete):** establish the Go module, ignore generated files, document service boundaries and interaction types.
-2. **Inventory (complete):** implement the independent availability service with sample stock, add tests, and document how to run and query it.
-3. **Order (complete):** implement order creation and tracking, query Inventory over HTTP with a timeout, handle failures, and add tests and request examples.
-4. **Verification and submission documentation (complete):** run both processes, stop and restart Inventory, capture actual output, and complete the README with evidence and a 3-5 sentence reflection.
-
-The project was implemented in these stages so each change could be reviewed and committed separately. Service run commands and observed results are included below.
-
 ## Run Inventory
 
 From the repository root, start the Inventory process:
